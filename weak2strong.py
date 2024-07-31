@@ -53,11 +53,11 @@ class Weak2StrongClassifier:
         X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, random_state=42)
         return X_train, X_test, y_train, y_test
 
-    def svm(self, forward_info, classifier_path):
+    def svm(self, forward_info, path):
         X_train, X_test, y_train, y_test = self._process_data(forward_info)
         svm_model = SVC(kernel='linear')
         svm_model.fit(X_train, y_train)
-        joblib.dump(svm_model, classifier_path)
+        joblib.dump(svm_model, path)
         y_pred = svm_model.predict(X_test)
         report = None
         if self.return_report:
@@ -67,7 +67,7 @@ class Weak2StrongClassifier:
             report = classification_report(y_test, y_pred, zero_division=0.0, output_dict=True)
         return X_test, y_pred, report
 
-    def mlp(self, forward_info, classifier_path):
+    def mlp(self, forward_info, path):
         X_train, X_test, y_train, y_test = self._process_data(forward_info)
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
@@ -78,7 +78,7 @@ class Weak2StrongClassifier:
                             learning_rate_init=.01)
 
         mlp.fit(X_train_scaled, y_train)
-        joblib.dump(mlp, classifier_path)
+        joblib.dump(mlp, path)
         y_pred = mlp.predict(X_test_scaled)
         report = None
         if self.return_report:
@@ -126,13 +126,13 @@ class Weak2StrongExplanation:
         if "svm" in classifier_list:
             rep_dict["svm"] = {}
             for _ in range(0, self.layer_sums):
-                x, y, rep = classifier.svm(get_layer(self.forward_info, _))
+                x, y, rep = classifier.svm(get_layer(self.forward_info, _), self.classifier_path)
                 rep_dict["svm"][_] = rep
 
         if "mlp" in classifier_list:
             rep_dict["mlp"] = {}
             for _ in range(0, self.layer_sums):
-                x, y, rep = classifier.mlp(get_layer(self.forward_info, _))
+                x, y, rep = classifier.mlp(get_layer(self.forward_info, _), self.classifier_path)
                 rep_dict["mlp"][_] = rep
         
         if not self.return_visual:
