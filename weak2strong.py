@@ -53,36 +53,46 @@ class Weak2StrongClassifier:
         X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, random_state=42)
         return X_train, X_test, y_train, y_test
 
-    def svm(self, forward_info, path):
+    def svm(self, forward_info, layer, path_template, scaler_path_template):
         X_train, X_test, y_train, y_test = self._process_data(forward_info)
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+
+        # 保存 scaler
+        joblib.dump(scaler, scaler_path_template.format(layer))
+
         svm_model = SVC(kernel='linear')
-        svm_model.fit(X_train, y_train)
-        joblib.dump(svm_model, path)
-        y_pred = svm_model.predict(X_test)
+        svm_model.fit(X_train_scaled, y_train)
+        joblib.dump(svm_model, path_template.format(layer))
+        y_pred = svm_model.predict(X_test_scaled)
         report = None
         if self.return_report:
-            print("SVM Test Classification Report:")
+            print(f"SVM Test Classification Report for Layer {layer}:")
             print(classification_report(y_test, y_pred, zero_division=0.0))
         if self.return_visual:
             report = classification_report(y_test, y_pred, zero_division=0.0, output_dict=True)
         return X_test, y_pred, report
 
-    def mlp(self, forward_info, path):
+    def mlp(self, forward_info, layer, path_template, scaler_path_template):
         X_train, X_test, y_train, y_test = self._process_data(forward_info)
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
+
+        # 保存 scaler
+        joblib.dump(scaler, scaler_path_template.format(layer))
 
         mlp = MLPClassifier(hidden_layer_sizes=(100,), max_iter=300, alpha=0.01,
                             solver='adam', verbose=0, random_state=42,
                             learning_rate_init=.01)
 
         mlp.fit(X_train_scaled, y_train)
-        joblib.dump(mlp, path)
+        joblib.dump(mlp, path_template.format(layer))
         y_pred = mlp.predict(X_test_scaled)
         report = None
         if self.return_report:
-            print("MLP Test Classification Report:")
+            print(f"MLP Test Classification Report for Layer {layer}:")
             print(classification_report(y_test, y_pred, zero_division=0.0))
         if self.return_visual:
             report = classification_report(y_test, y_pred, zero_division=0.0, output_dict=True)
@@ -90,12 +100,13 @@ class Weak2StrongClassifier:
 
 
 class Weak2StrongExplanation:
-    def __init__(self, model_path, classifier_path, layer_nums=32, return_report=True, return_visual=True):
+    def __init__(self, model_path, classifier_path_template, scaler_path_template, layer_nums=32, return_report=True, return_visual=True):
         self.model, self.tokenizer = get_model(model_path)
         self.model_name = model_path.split("/")[-1]
         self.layer_sums = layer_nums + 1
         self.forward_info = {}
-        self.classifier_path = classifier_path
+        self.classifier_path_template = classifier_path_template
+        self.scaler_path_template = scaler_path_template
         self.return_report = return_report
         self.return_visual = return_visual
 
@@ -125,15 +136,15 @@ class Weak2StrongExplanation:
         rep_dict = {}
         if "svm" in classifier_list:
             rep_dict["svm"] = {}
-            for _ in range(0, self.layer_sums):
-                x, y, rep = classifier.svm(get_layer(self.forward_info, _), self.classifier_path)
-                rep_dict["svm"][_] = rep
+            for layer in range(0, self.layer_sums):
+                x, y, rep = classifier.svm(get_layer(self.forward_info, layer), layer, self.classifier_path_template, self.scaler_path_template)
+                rep_dict["svm"][layer] = rep
 
         if "mlp" in classifier_list:
             rep_dict["mlp"] = {}
-            for _ in range(0, self.layer_sums):
-                x, y, rep = classifier.mlp(get_layer(self.forward_info, _), self.classifier_path)
-                rep_dict["mlp"][_] = rep
+            for layer in range(0, self.layer_sums):
+                x, y, rep = classifier.mlp(get_layer(self.forward_info, layer), layer, self.classifier_path_template, self.scaler_path_template)
+                rep_dict["mlp"][layer] = rep
         
         if not self.return_visual:
             return
@@ -144,5 +155,5 @@ class Weak2StrongExplanation:
     def vis_heatmap(self, dataset, left=0, right=33, debug=True, model_name=""):
         self.forward_info = {}
         self.get_forward_info(dataset, 0, debug=debug)
-        topk_intermediate_confidence_heatmap(self.forward_info, left=left, right=right,model_name=model_name)
-            
+        topk_intermediate_confidence_heatmap(self.forward_info, left=left, right=right, model_name=model_name)
+
