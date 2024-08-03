@@ -1,5 +1,7 @@
 # LLM-Safety-Acceleration
 
-A repo for our new research: **Modular Residual Risk Detection and Inference Acceleration System for Large Language Models**
+A repo for our new research: **Fast and Accurate Unethical Rejection For LLMs Based on Residual Stream Classification**
 
-Since the application of the Large Language Models, there has been an endless stream of research on the interpretability of model jailbreaking. Researchers are eager to know what secrets are hidden in the "black box" of the neural network layer of the jailbreaked large model. This project preposes a framework for analyzing the security risks of large model residual flows using a low burden algorithm design, which can identify malicious requests in the early stages of model inference and accelerate inference. In addition, we also provide pluggable defense and acceleration models for multiple open-source language models.
+## Abstract
+
+Residual streams of LLMs are proved to have an ethical representation. In this paper, we present a novel algorithm which classifies the input is ethical or not. Our method performs safety classification at lower layers and has low computational overhead. Based on our approach, we introduce a plug-in defense framework. Mitigating novel jailbreaks only requires updating the classification algorithm, without tuning the model. Since rejection responses are often stylized, we propose a leap-layer inference acceleration method. This approach can reduce the computational overhead when responding to harmful inputs, making LLMs more CO2-friendly. 
