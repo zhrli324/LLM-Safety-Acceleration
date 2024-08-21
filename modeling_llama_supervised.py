@@ -896,7 +896,7 @@ class LlamaModel(LlamaPreTrainedModel):
         config: LlamaConfig
     """
 
-    def __init__(self, config: LlamaConfig):
+    def __init__(self, config: LlamaConfig, skip):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -907,6 +907,8 @@ class LlamaModel(LlamaPreTrainedModel):
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.gradient_checkpointing = False
+
+        self.skip = skip
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1008,8 +1010,11 @@ class LlamaModel(LlamaPreTrainedModel):
         #end_layer = num_layers - start_layer
 
         for layer_idx in range(num_layers):
-            if layer_idx >= 5 and layer_idx % 2 != 0:
-                continue
+            if output_hidden_states:
+                all_hidden_states += (hidden_states,)
+            if self.skip == True:
+                if layer_idx >= 5 and layer_idx % 2 != 0:
+                    continue
             #print(f"处理第 {layer_idx} 层，输入形状: {hidden_states.shape}")
             layer_outputs = self._pass_through_layer(
                 layer_idx=layer_idx,
@@ -1175,9 +1180,9 @@ class LlamaModel(LlamaPreTrainedModel):
 class LlamaForCausalLM(LlamaPreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
-    def __init__(self, config):
+    def __init__(self, config, skip=True):
         super().__init__(config)
-        self.model = LlamaModel(config)
+        self.model = LlamaModel(config, skip)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 

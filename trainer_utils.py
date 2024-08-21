@@ -34,7 +34,8 @@ def load_exp_data(shuffle_seed=None, use_conv=False, model_name=None):
 def get_layer(forward_info, layer):
     new_forward_info = {}
     for k, v in forward_info.items():
-        new_forward_info[k] = {"hidden_states": v["hidden_states"][layer], "top-value_pair": v["top-value_pair"][layer], "label":v["label"]}
+        # print(f"Layer: {layer}, Hidden States Length: {len(v['hidden_states'])}")
+        new_forward_info[k] = {"hidden_states": v["hidden_states"][layer], "label": v["label"]}
     return new_forward_info
 
 
@@ -97,44 +98,40 @@ class SafetyClassifier:
 
 
 class ClassifierTrainer:
-    def __init__(self, model_path, layer_nums=32, skip=False, train=True, return_report=True, return_visual=True):
-        self.model = LlamaForCausalLM.from_pretrained(model_path, skip=skip, train=train, device_map="auto")
+    def __init__(self, model_path, layer_nums, skip=False, return_report=True, return_visual=True):
+        self.model = LlamaForCausalLM.from_pretrained(model_path, skip=skip, device_map="auto")
         self.model.eval()
         self.tokenizer = LlamaTokenizer.from_pretrained(model_path)
         self.model_name = model_path.split("/")[-1]
         self.forward_info = {}
         self.return_report = return_report
-        self.reture_visual = return_visual
+        self.return_visual = return_visual
         self.layer_sums = layer_nums
+
+    def step_forward(self, model, tokenizer, prompt):
+        inputs = tokenizer(prompt, return_tensors="pt")
+        inputs.to(model.device)
+        input_ids = inputs['input_ids']
+        with torch.no_grad():
+            outputs = model(input_ids, output_hidden_states=True)
+        # print(len(outputs.hidden_states))
+        res_hidden_states = []
+        for _ in outputs.hidden_states:
+            res_hidden_states.append(_.detach().cpu().numpy())
+        return res_hidden_states
 
     def get_forward_info(self, inputs_dataset, class_label, debug=True):
         offset = len(self.forward_info)
         for _, i in enumerate(inputs_dataset):
             if debug and _ > 100:
                 break
-            # print(self.model.device)
-            inputs = self.tokenizer(i, return_tensors="pt")
-            inputs = inputs.to(self.model.device)
-            input_ids = inputs['input_ids']
-            # print(input_ids)
-            with torch.no_grad():
-                outputs = self.model(input_ids, output_hidden_states=True)
-            print(outputs)
-            list_hs = []
-            # print(outputs.size())
-            # print(outputs.hidden_states.size())
-            for _ in outputs.hidden_states:
-                list_hs.append(_.detach().cpu().numpy())
+            
+            list_hs = self.step_forward(self.model, self.tokenizer, i)
             last_hs = [hs[:, -1, :] for hs in list_hs]
-
-            # with torch.no_grad():
-            #     generated_ids = self.model.generate(input_ids=input_ids, max_new_tokens=150, pad_token_id=self.tokenizer.eos_token_id)
-
             self.forward_info[_ + offset] = {"hidden_states": last_hs, "label": class_label}
+    
 
     def forward(self, datasets, debug=True):
-        self.forward_info = {}
-        forward_info = {}
         if isinstance(datasets, list):
             for class_num, dataset in enumerate(datasets):
                 self.get_forward_info(dataset, class_num, debug=debug)
