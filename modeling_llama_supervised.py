@@ -27,6 +27,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+import warnings
 
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache, StaticCache
@@ -1003,18 +1004,27 @@ class LlamaModel(LlamaPreTrainedModel):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = None
 
-        # === Painter ===
         num_layers = len(self.layers)
-        #method = self.method
         layer_cnt = 0  # Index for kv cache
-        #start_layer = self.start_layer if self.start_layer is not None else 0
-        #end_layer = num_layers - start_layer
+
+        skip_or_not = False
 
         for layer_idx in range(num_layers):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
-            if self.skip == True:
-                if layer_idx >= 5 and layer_idx % 2 != 0:
+
+            if self.skip and self.use_classifier:
+                import classify_utils
+                if layer_idx == 0:
+                    classify_utils.malicious = False
+                if classify_utils.malicious:
+                    skip_or_not = True
+
+            if self.skip and not self.use_classifier:
+                skip_or_not = True
+
+            if skip_or_not:
+                if layer_idx >= 9 and layer_idx <= 28 and layer_idx % 2 != 0:
                     continue
 
             print(f"Processing layer: {layer_idx}")
@@ -1022,9 +1032,9 @@ class LlamaModel(LlamaPreTrainedModel):
             if self.use_classifier:
                 import numpy as np
                 from joblib import load
-                path_template = {"classifier_path_svm": './src/classifier_svm/classifier_svm_layer_{}.pkl',
-                                "classifier_path_mlp": './src/classifier_mlp/classifier_mlp_layer_{}.pkl',
-                                "scaler_path_mlp": './src/scaler_mlp/scaler_mlp_layer_{}.pkl'}
+                path_template = {"classifier_path_svm": './models/classifier_svm/classifier_svm_layer_{}.pkl',
+                                "classifier_path_mlp": './models/classifier_mlp/classifier_mlp_layer_{}.pkl',
+                                "scaler_path_mlp": './models/scaler_mlp/scaler_mlp_layer_{}.pkl'}
                 feature = []
                 hidden_state_process = self.norm(hidden_states).clone().detach().cpu().numpy()
                 hidden_state_process = hidden_state_process[:, -1, :].flatten()
@@ -1032,7 +1042,10 @@ class LlamaModel(LlamaPreTrainedModel):
                 feature = np.array(feature)
                 svm_model = load(path_template["classifier_path_svm"].format(layer_idx))
                 harmful_or_not = svm_model.predict(feature)
-                print(harmful_or_not)
+                # print(harmful_or_not)
+                classify_utils.classifier_results.append(harmful_or_not)
+                print(classify_utils.decide_malicious(classify_utils.classifier_results))
+                classify_utils.malicious = True if classify_utils.decide_malicious(classify_utils.classifier_results) == ['norm'] else False
 
             layer_outputs = self._pass_through_layer(
                 layer_idx=layer_idx,
