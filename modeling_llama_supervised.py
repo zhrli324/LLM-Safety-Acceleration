@@ -896,7 +896,7 @@ class LlamaModel(LlamaPreTrainedModel):
         config: LlamaConfig
     """
 
-    def __init__(self, config: LlamaConfig, skip):
+    def __init__(self, config: LlamaConfig, skip, use_classifier):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -909,6 +909,7 @@ class LlamaModel(LlamaPreTrainedModel):
         self.gradient_checkpointing = False
 
         self.skip = skip
+        self.use_classifier = use_classifier
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1015,7 +1016,24 @@ class LlamaModel(LlamaPreTrainedModel):
             if self.skip == True:
                 if layer_idx >= 5 and layer_idx % 2 != 0:
                     continue
-            #print(f"处理第 {layer_idx} 层，输入形状: {hidden_states.shape}")
+
+            print(f"Processing layer: {layer_idx}")
+
+            if self.use_classifier:
+                import numpy as np
+                from joblib import load
+                path_template = {"classifier_path_svm": './src/classifier_svm/classifier_svm_layer_{}.pkl',
+                                "classifier_path_mlp": './src/classifier_mlp/classifier_mlp_layer_{}.pkl',
+                                "scaler_path_mlp": './src/scaler_mlp/scaler_mlp_layer_{}.pkl'}
+                feature = []
+                hidden_state_process = self.norm(hidden_states).clone().detach().cpu().numpy()
+                hidden_state_process = hidden_state_process[:, -1, :].flatten()
+                feature.append(hidden_state_process)
+                feature = np.array(feature)
+                svm_model = load(path_template["classifier_path_svm"].format(layer_idx))
+                harmful_or_not = svm_model.predict(feature)
+                print(harmful_or_not)
+
             layer_outputs = self._pass_through_layer(
                 layer_idx=layer_idx,
                 hidden_states=hidden_states,
@@ -1028,7 +1046,8 @@ class LlamaModel(LlamaPreTrainedModel):
             )
             layer_cnt += 1
             hidden_states = layer_outputs[0]
-            #print(f"处理完第 {layer_idx} 层，输出形状: {hidden_states.shape}")
+
+            print(f"Layer: {layer_idx} done")
             if use_cache:
                 next_decoder_cache = layer_outputs[
                     2 if output_attentions else 1
@@ -1180,9 +1199,9 @@ class LlamaModel(LlamaPreTrainedModel):
 class LlamaForCausalLM(LlamaPreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
-    def __init__(self, config, skip=True):
+    def __init__(self, config, skip=True, use_classifier=True):
         super().__init__(config)
-        self.model = LlamaModel(config, skip)
+        self.model = LlamaModel(config, skip, use_classifier)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 

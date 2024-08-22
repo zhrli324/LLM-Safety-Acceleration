@@ -1,7 +1,9 @@
 from fastchat.conversation import get_conv_template
-from w2s_utils import set_seed
+import numpy as np
+import torch
 import pandas as pd
 import random
+
 
 llama3_template = """
 <|begin_of_text|><|start_header_id|>system<|end_header_id|>
@@ -14,6 +16,13 @@ llama_system_prompt = "You are a helpful and harmless assistant"
 mistral_system_prompt = ("Always assist with care, respect, and truth. Respond with utmost utility yet securely. Avoid "
                          "harmful, unethical, prejudiced, or negative content. Ensure replies promote fairness and "
                          "positivity.")
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def load_conv(model_name, goal):

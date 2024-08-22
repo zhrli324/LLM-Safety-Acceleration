@@ -1,4 +1,3 @@
-from load_data import get_data, load_conv
 import os
 import torch
 import numpy as np
@@ -7,14 +6,18 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report
+
 from modeling_llama_supervised import LlamaForCausalLM
 from transformers import LlamaTokenizer
-import joblib
-from visualization import topk_intermediate_confidence_heatmap, accuracy_line
+from joblib import dump
+from load_data import get_data, load_conv
+from visualization import accuracy_line
+
 
 norm_prompt_path = './exp_data/normal_prompt.csv'
 jailbreak_prompt_path = './exp_data/jailbreak_prompt.csv'
 malicious_prompt_path = './exp_data/malicious_prompt.csv'
+
 
 def load_exp_data(shuffle_seed=None, use_conv=False, model_name=None):
     normal_inputs = get_data(norm_prompt_path, shuffle_seed)
@@ -31,10 +34,10 @@ def load_exp_data(shuffle_seed=None, use_conv=False, model_name=None):
         jailbreak_inputs = [load_conv(model_name, _) for _ in jailbreak_inputs] if jailbreak_inputs is not None else None
     return normal_inputs, malicious_inputs, jailbreak_inputs
 
+
 def get_layer(forward_info, layer):
     new_forward_info = {}
     for k, v in forward_info.items():
-        # print(f"Layer: {layer}, Hidden States Length: {len(v['hidden_states'])}")
         new_forward_info[k] = {"hidden_states": v["hidden_states"][layer], "label": v["label"]}
     return new_forward_info
 
@@ -52,7 +55,6 @@ class SafetyClassifier:
             for hidden_state in value["hidden_states"]:
                 features.append(hidden_state.flatten())
                 labels.append(value["label"])
-
         features = np.array(features)
         labels = np.array(labels)
         X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, random_state=42)
@@ -62,7 +64,7 @@ class SafetyClassifier:
         X_train, X_test, y_train, y_test = self._process_data(forward_info)
         svm_model = SVC(kernel='linear')
         svm_model.fit(X_train, y_train)
-        joblib.dump(svm_model, path_template.format(layer))
+        dump(svm_model, path_template.format(layer))
         y_pred = svm_model.predict(X_test)
         report = None
         if self.return_report:
@@ -77,16 +79,12 @@ class SafetyClassifier:
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
-
-        # 保存 scaler
-        joblib.dump(scaler, scaler_path_template.format(layer))
-
+        dump(scaler, scaler_path_template.format(layer))
         mlp = MLPClassifier(hidden_layer_sizes=(100,), max_iter=300, alpha=0.01,
                             solver='adam', verbose=0, random_state=42,
                             learning_rate_init=.01)
-
         mlp.fit(X_train_scaled, y_train)
-        joblib.dump(mlp, path_template.format(layer))
+        dump(mlp, path_template.format(layer))
         y_pred = mlp.predict(X_test_scaled)
         report = None
         if self.return_report:
@@ -114,7 +112,6 @@ class ClassifierTrainer:
         input_ids = inputs['input_ids']
         with torch.no_grad():
             outputs = model(input_ids, output_hidden_states=True)
-        # print(len(outputs.hidden_states))
         res_hidden_states = []
         for _ in outputs.hidden_states:
             res_hidden_states.append(_.detach().cpu().numpy())
@@ -125,12 +122,10 @@ class ClassifierTrainer:
         for _, i in enumerate(inputs_dataset):
             if debug and _ > 100:
                 break
-            
             list_hs = self.step_forward(self.model, self.tokenizer, i)
             last_hs = [hs[:, -1, :] for hs in list_hs]
             self.forward_info[_ + offset] = {"hidden_states": last_hs, "label": class_label}
     
-
     def forward(self, datasets, debug=True):
         if isinstance(datasets, list):
             for class_num, dataset in enumerate(datasets):
@@ -150,15 +145,12 @@ class ClassifierTrainer:
             for layer in range(0, self.layer_sums):
                 x, y, rep = classifier.svm(get_layer(self.forward_info, layer), layer, classifier_path_svm)
                 rep_dict["svm"][layer] = rep
-
         if "mlp" in classifier_list:
             rep_dict["mlp"] = {}
             for layer in range(0, self.layer_sums):
                 x, y, rep = classifier.mlp(get_layer(self.forward_info, layer), layer, classifier_path_mlp, scaler_path_mlp)
                 rep_dict["mlp"][layer] = rep
-        
         if not self.return_visual:
             return
-        
         if accuracy and classifier_list != []:
             accuracy_line(rep_dict, self.model_name)
