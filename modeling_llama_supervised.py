@@ -1007,45 +1007,44 @@ class LlamaModel(LlamaPreTrainedModel):
         num_layers = len(self.layers)
         layer_cnt = 0  # Index for kv cache
 
-        skip_or_not = False
+        if self.skip and self.use_classifier:
+            import classify_utils
 
         for layer_idx in range(num_layers):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
             if self.skip and self.use_classifier:
-                import classify_utils
                 if layer_idx == 0:
                     classify_utils.malicious = False
                 if classify_utils.malicious:
-                    skip_or_not = True
+                    classify_utils.is_harmful = True
 
             if self.skip and not self.use_classifier:
-                skip_or_not = True
+                classify_utils.is_harmful = True
 
-            if skip_or_not:
-                if layer_idx >= 9 and layer_idx <= 28 and layer_idx % 2 != 0:
+            if classify_utils.is_harmful:
+                if layer_idx in classify_utils.least_sparse_layers:
                     continue
 
-            print(f"Processing layer: {layer_idx}")
+            # print(f"Processing layer: {layer_idx}")
 
-            if self.use_classifier:
+            if self.use_classifier and not classify_utils.is_harmful:
                 import numpy as np
                 from joblib import load
                 path_template = {"classifier_path_svm": './models/classifier_svm/classifier_svm_layer_{}.pkl',
                                 "classifier_path_mlp": './models/classifier_mlp/classifier_mlp_layer_{}.pkl',
                                 "scaler_path_mlp": './models/scaler_mlp/scaler_mlp_layer_{}.pkl'}
-                feature = []
+                features = []
                 hidden_state_process = self.norm(hidden_states).clone().detach().cpu().numpy()
                 hidden_state_process = hidden_state_process[:, -1, :].flatten()
-                feature.append(hidden_state_process)
-                feature = np.array(feature)
+                features.append(hidden_state_process)
+                features = np.array(features)
                 svm_model = load(path_template["classifier_path_svm"].format(layer_idx))
-                harmful_or_not = svm_model.predict(feature)
+                harmful_or_not = svm_model.predict(features)
                 # print(harmful_or_not)
-                classify_utils.classifier_results.append(harmful_or_not)
-                print(classify_utils.decide_malicious(classify_utils.classifier_results))
-                classify_utils.malicious = True if classify_utils.decide_malicious(classify_utils.classifier_results) == ['norm'] else False
+                if classify_utils.i == 0:
+                    classify_utils.classifier_results.append(harmful_or_not)
 
             layer_outputs = self._pass_through_layer(
                 layer_idx=layer_idx,
@@ -1060,12 +1059,23 @@ class LlamaModel(LlamaPreTrainedModel):
             layer_cnt += 1
             hidden_states = layer_outputs[0]
 
-            print(f"Layer: {layer_idx} done")
+            # print(f"Layer: {layer_idx} done")
             if use_cache:
                 next_decoder_cache = layer_outputs[
                     2 if output_attentions else 1
                 ]
 
+        if self.skip and self.use_classifier:
+            if classify_utils.i == 0:
+                # print(classify_utils.classifier_results)
+                classify_utils.is_harmful = classify_utils.decide_malicious(classify_utils.classifier_results)
+                print(classify_utils.is_harmful)
+                classify_utils.malicious = True if classify_utils.is_harmful else False
+                # print(classify_utils.malicious)
+            classify_utils.i -= 1
+        
+        
+        
         hidden_states = self.norm(hidden_states)
 
         # add hidden states from the last decoder layer
@@ -1218,6 +1228,9 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
+        self.skip = skip
+        self.use_classifier = use_classifier
+
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1238,7 +1251,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
 
     def get_decoder(self):
         return self.model
-
+    
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=CausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
     def forward(
@@ -1287,6 +1300,20 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+
+
+        if self.skip and self.use_classifier:  # 你要判断的变量
+            import classify_utils
+            # print(classify_utils.is_harmful)
+
+            if classify_utils.is_harmful and not classify_utils.sparsified:
+                self = classify_utils.sparsify_model(self, sparsity_threshold=3e-3)
+                print("Model has been pruned.")
+                classify_utils.sparsified = True
+                classify_utils.least_sparse_layers = classify_utils.find_least_sparse_layers(self, num_layers=3)
+                # 打印最不稀疏的5层
+                print("Least sparse layers (by number):", classify_utils.least_sparse_layers)
+
         outputs = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,

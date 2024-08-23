@@ -96,8 +96,8 @@ class SafetyClassifier:
 
 
 class ClassifierTrainer:
-    def __init__(self, model_path, layer_nums, skip=False, return_report=True, return_visual=True):
-        self.model = LlamaForCausalLM.from_pretrained(model_path, skip=skip, device_map="auto")
+    def __init__(self, model_path, layer_nums, skip=False, use_classifier=False, return_report=True, return_visual=True):
+        self.model = LlamaForCausalLM.from_pretrained(model_path, output_hidden_states=True, skip=skip, use_classifier=use_classifier, device_map="auto")
         self.model.eval()
         self.tokenizer = LlamaTokenizer.from_pretrained(model_path)
         self.model_name = model_path.split("/")[-1]
@@ -111,7 +111,7 @@ class ClassifierTrainer:
         inputs.to(model.device)
         input_ids = inputs['input_ids']
         with torch.no_grad():
-            outputs = model(input_ids, output_hidden_states=True)
+            outputs = model(input_ids)
         res_hidden_states = []
         for _ in outputs.hidden_states:
             res_hidden_states.append(_.detach().cpu().numpy())
