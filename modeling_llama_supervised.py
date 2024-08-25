@@ -1007,29 +1007,34 @@ class LlamaModel(LlamaPreTrainedModel):
         num_layers = len(self.layers)
         layer_cnt = 0  # Index for kv cache
 
-        if self.skip and self.use_classifier:
+        if self.skip or self.use_classifier:
             import classify_utils
 
+        
         for layer_idx in range(num_layers):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
-            if self.skip and self.use_classifier:
+            if self.skip and self.use_classifier and not classify_utils.pruning:
                 if layer_idx == 0:
                     classify_utils.malicious = False
                 if classify_utils.malicious:
                     classify_utils.is_harmful = True
 
-            if self.skip and not self.use_classifier:
+            if self.skip and not self.use_classifier and not classify_utils.pruning:
                 classify_utils.is_harmful = True
 
-            if classify_utils.is_harmful:
-                if layer_idx in classify_utils.least_sparse_layers:
-                    continue
+            if self.skip and self.use_classifier and not classify_utils.pruning:
+                if classify_utils.is_harmful:
+                    if layer_idx >= 8 and layer_idx < 28 and layer_idx % 2 == 0:
+                    # if layer_idx in classify_utils.least_sparse_layers:
+                        # continue
+                        pass
+                        
 
             # print(f"Processing layer: {layer_idx}")
 
-            if self.use_classifier and not classify_utils.is_harmful:
+            if self.use_classifier and not classify_utils.is_harmful and not classify_utils.pruning:
                 import numpy as np
                 from joblib import load
                 path_template = {"classifier_path_svm": './models/classifier_svm/classifier_svm_layer_{}.pkl',
@@ -1065,7 +1070,7 @@ class LlamaModel(LlamaPreTrainedModel):
                     2 if output_attentions else 1
                 ]
 
-        if self.skip and self.use_classifier:
+        if self.skip and self.use_classifier and not classify_utils.pruning:
             if classify_utils.i == 0:
                 # print(classify_utils.classifier_results)
                 classify_utils.is_harmful = classify_utils.decide_malicious(classify_utils.classifier_results)
@@ -1301,18 +1306,35 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
 
+        if self.skip:
+            import classify_utils
+            if not classify_utils.sparsified:
+                classify_utils.pruning = True
+                classify_utils.sparsified = True
+                classify_utils.prune_wanda(self, 0.2, prune_n=0, prune_m=0)
+                print("Model has been pruned.")
+                classify_utils.least_sparse_layers, sorted_sparsity = classify_utils.find_least_sparse_layers(self, num_layers=13)
+                for layer_number, sparsity in sorted_sparsity:
+                    print("NUM:", layer_number, "sparsity", sparsity)
+                classify_utils.pruning = False
 
-        if self.skip and self.use_classifier:  # 你要判断的变量
+        if self.skip and self.use_classifier:
             import classify_utils
             # print(classify_utils.is_harmful)
 
             if classify_utils.is_harmful and not classify_utils.sparsified:
-                self = classify_utils.sparsify_model(self, sparsity_threshold=3e-3)
-                print("Model has been pruned.")
+                classify_utils.pruning = True
                 classify_utils.sparsified = True
-                classify_utils.least_sparse_layers = classify_utils.find_least_sparse_layers(self, num_layers=3)
+                # self = classify_utils.sparsify_model(self, sparsity_threshold=1e-2)
+                self = classify_utils.prune_wanda(self, 0.5, prune_n=2, prune_m=4)
+                # self = classify_utils.prune_sparsegpt(self, 0.5)
+                print("Model has been pruned.")
+                classify_utils.least_sparse_layers, sorted_sparsity = classify_utils.find_least_sparse_layers(self, num_layers=13)
+                for layer_number, sparsity in sorted_sparsity:
+                    print("NUM:", layer_number, "sparsity", sparsity)
                 # 打印最不稀疏的5层
                 print("Least sparse layers (by number):", classify_utils.least_sparse_layers)
+                classify_utils.pruning = False
 
         outputs = self.model(
             input_ids=input_ids,
